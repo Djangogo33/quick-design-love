@@ -113,8 +113,9 @@ function ProjectPage() {
         { event: "*", schema: "public", table: "feedbacks", filter: `project_id=eq.${projectId}` },
         (payload) => {
           if (payload.eventType === "INSERT") {
-            setFeedbacks((prev) => [payload.new as Feedback, ...prev]);
-            toast.success("Nouveau feedback reçu");
+            const f = payload.new as Feedback;
+            setFeedbacks((prev) => [f, ...prev]);
+            toast.success(`💬 Nouveau feedback de ${f.author_name}`);
           } else if (payload.eventType === "UPDATE") {
             setFeedbacks((prev) => prev.map((x) => (x.id === (payload.new as Feedback).id ? (payload.new as Feedback) : x)));
           } else if (payload.eventType === "DELETE") {
