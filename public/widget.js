@@ -182,11 +182,14 @@
       submitBtn.onclick = async function () {
         var msg = msgInput.value.trim();
         if (!msg) return;
+        // Clear any previous inline error
+        var prevErr = bg.querySelector(".rdrop-inline-error");
+        if (prevErr) prevErr.remove();
         submitBtn.disabled = true;
         submitBtn.textContent = "Envoi...";
         try { localStorage.setItem("reviewdrop_name", nameInput.value); } catch (e) {}
 
-        // Capture screenshot (best-effort)
+        // Capture screenshot (best-effort, never blocks submission)
         var screenshot = null;
         try {
           var h2c = await loadHtml2Canvas();
@@ -195,7 +198,10 @@
             screenshot = canvas.toDataURL("image/jpeg", 0.7);
             if (screenshot.length > 4_500_000) screenshot = null;
           }
-        } catch (e) {}
+        } catch (e) {
+          // Screenshot failed (CORS, taint, etc.) — send feedback without it.
+          screenshot = null;
+        }
 
         var body = {
           project_token: token,
@@ -218,11 +224,19 @@
             body: JSON.stringify(body),
           });
           if (!res.ok) throw new Error("fail");
-          close();
-          showToast("Feedback envoyé. Merci !");
+          // Success: show inline confirmation for 3s, then close.
+          var modalEl = bg.querySelector("#rdrop-modal");
+          modalEl.innerHTML =
+            '<div class="rdrop-inline-success">Merci ! Feedback envoyé 👍</div>';
+          setTimeout(close, 3000);
         } catch (e) {
           submitBtn.disabled = false;
-          submitBtn.textContent = "Réessayer";
+          submitBtn.textContent = "Envoyer";
+          var err = document.createElement("div");
+          err.className = "rdrop-inline-error";
+          err.textContent = "Une erreur est survenue. Réessayez.";
+          var actions = bg.querySelector("#rdrop-modal-actions");
+          actions.parentNode.insertBefore(err, actions);
         }
       };
     }
