@@ -92,6 +92,8 @@
       ".rdrop-cancel{background:transparent;color:#666;}" +
       ".rdrop-submit{background:" + BRAND + ";color:#fff;}" +
       ".rdrop-submit:disabled{opacity:.5;cursor:not-allowed;}" +
+      ".rdrop-inline-error{margin-top:12px;padding:8px 10px;background:#fee2e2;color:#991b1b;border-radius:6px;font-size:13px;}" +
+      ".rdrop-inline-success{margin-top:12px;padding:8px 10px;background:#d1fae5;color:#065f46;border-radius:6px;font-size:13px;text-align:center;font-weight:500;}" +
       "#rdrop-toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:2147483647;background:#10b981;color:#fff;padding:10px 18px;border-radius:8px;font-size:14px;box-shadow:0 4px 16px rgba(0,0,0,.2);}";
     document.head.appendChild(style);
 
@@ -180,11 +182,14 @@
       submitBtn.onclick = async function () {
         var msg = msgInput.value.trim();
         if (!msg) return;
+        // Clear any previous inline error
+        var prevErr = bg.querySelector(".rdrop-inline-error");
+        if (prevErr) prevErr.remove();
         submitBtn.disabled = true;
         submitBtn.textContent = "Envoi...";
         try { localStorage.setItem("reviewdrop_name", nameInput.value); } catch (e) {}
 
-        // Capture screenshot (best-effort)
+        // Capture screenshot (best-effort, never blocks submission)
         var screenshot = null;
         try {
           var h2c = await loadHtml2Canvas();
@@ -193,7 +198,10 @@
             screenshot = canvas.toDataURL("image/jpeg", 0.7);
             if (screenshot.length > 4_500_000) screenshot = null;
           }
-        } catch (e) {}
+        } catch (e) {
+          // Screenshot failed (CORS, taint, etc.) — send feedback without it.
+          screenshot = null;
+        }
 
         var body = {
           project_token: token,
@@ -216,11 +224,19 @@
             body: JSON.stringify(body),
           });
           if (!res.ok) throw new Error("fail");
-          close();
-          showToast("Feedback envoyé. Merci !");
+          // Success: show inline confirmation for 3s, then close.
+          var modalEl = bg.querySelector("#rdrop-modal");
+          modalEl.innerHTML =
+            '<div class="rdrop-inline-success">Merci ! Feedback envoyé 👍</div>';
+          setTimeout(close, 3000);
         } catch (e) {
           submitBtn.disabled = false;
-          submitBtn.textContent = "Réessayer";
+          submitBtn.textContent = "Envoyer";
+          var err = document.createElement("div");
+          err.className = "rdrop-inline-error";
+          err.textContent = "Une erreur est survenue. Réessayez.";
+          var actions = bg.querySelector("#rdrop-modal-actions");
+          actions.parentNode.insertBefore(err, actions);
         }
       };
     }

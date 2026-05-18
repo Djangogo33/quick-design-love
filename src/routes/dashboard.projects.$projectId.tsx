@@ -9,7 +9,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { ArrowLeft, Copy, Check, Trash2, Settings, MessageSquare, ExternalLink, Download, Lock } from "lucide-react";
+import { ArrowLeft, Copy, Check, Trash2, Settings, ExternalLink, Download, Lock, Inbox } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { Tables } from "@/integrations/supabase/types";
 import { getLimits, normalizePlan, type PlanId, DEFAULT_BRAND_COLOR } from "@/lib/plans";
 
@@ -112,8 +113,9 @@ function ProjectPage() {
         { event: "*", schema: "public", table: "feedbacks", filter: `project_id=eq.${projectId}` },
         (payload) => {
           if (payload.eventType === "INSERT") {
-            setFeedbacks((prev) => [payload.new as Feedback, ...prev]);
-            toast.success("Nouveau feedback reçu");
+            const f = payload.new as Feedback;
+            setFeedbacks((prev) => [f, ...prev]);
+            toast.success(`💬 Nouveau feedback de ${f.author_name}`);
           } else if (payload.eventType === "UPDATE") {
             setFeedbacks((prev) => prev.map((x) => (x.id === (payload.new as Feedback).id ? (payload.new as Feedback) : x)));
           } else if (payload.eventType === "DELETE") {
@@ -159,13 +161,22 @@ function ProjectPage() {
   const widgetUrl = typeof window !== "undefined" ? `${window.location.origin}/widget.js` : "/widget.js";
   const snippet = project ? `<script src="${widgetUrl}" data-project="${project.public_token}" defer></script>` : "";
 
-  const copySnippet = () => {
-    navigator.clipboard.writeText(snippet);
+  const copySnippet = (text?: string) => {
+    navigator.clipboard.writeText(text ?? snippet);
     setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    setTimeout(() => setCopied(false), 2000);
   };
 
-  if (loading) return <div className="p-6 text-center text-muted-foreground">Chargement...</div>;
+  const openFeedback = async (id: string) => {
+    setSelectedId(id);
+    const target = feedbacks.find((f) => f.id === id);
+    if (target && !target.is_read) {
+      setFeedbacks((prev) => prev.map((x) => (x.id === id ? { ...x, is_read: true } : x)));
+      await supabase.from("feedbacks").update({ is_read: true }).eq("id", id);
+    }
+  };
+
+  if (loading) return <ProjectPageSkeleton />;
   if (!project) return <div className="p-6">Projet introuvable.</div>;
 
   const mockupUrl = project.mockup_image_path
@@ -217,7 +228,7 @@ function ProjectPage() {
             </p>
             <div className="flex gap-2 items-stretch">
               <code className="flex-1 text-xs bg-muted p-3 rounded-md overflow-x-auto whitespace-nowrap">{snippet}</code>
-              <Button variant="outline" onClick={copySnippet}>
+              <Button variant="outline" onClick={() => copySnippet()}>
                 {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
               </Button>
             </div>
@@ -261,16 +272,25 @@ function ProjectPage() {
         ))}
       </div>
 
+      {feedbacks.length === 0 ? (
+        <EmptyFeedbacks
+          isLive={project.type === "live"}
+          snippet={snippet}
+          reviewUrl={reviewUrl}
+          copied={copied}
+          onCopy={() => copySnippet(project.type === "live" ? snippet : reviewUrl)}
+        />
+      ) : (
       <div className="grid lg:grid-cols-[1fr_360px] gap-6">
         {/* Mockup preview with pins */}
         {project.type === "mockup" && mockupUrl && (
           <div className="relative rounded-lg border border-border bg-card overflow-hidden">
             <div className="relative">
               <img src={mockupUrl} alt={project.name} className="w-full block" />
-              {filtered.map((f, i) => (
+              {filtered.map((f) => (
                 <button
                   key={f.id}
-                  onClick={() => setSelectedId(f.id)}
+                  onClick={() => openFeedback(f.id)}
                   className={`absolute -translate-x-1/2 -translate-y-full flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold text-white shadow-lg ring-2 ring-white transition-transform hover:scale-110 ${
                     selectedId === f.id ? "scale-125 z-10" : ""
                   }`}
@@ -300,8 +320,8 @@ function ProjectPage() {
         <div className="space-y-3">
           {filtered.length === 0 ? (
             <div className="rounded-lg border-2 border-dashed border-border bg-card p-8 text-center">
-              <MessageSquare className="mx-auto h-8 w-8 text-muted-foreground" />
-              <p className="mt-2 text-sm text-muted-foreground">Aucun feedback</p>
+              <Inbox className="mx-auto h-8 w-8 text-muted-foreground" />
+              <p className="mt-2 text-sm text-muted-foreground">Aucun feedback avec ce filtre</p>
             </div>
           ) : selected ? (
             <FeedbackDetail
@@ -314,11 +334,14 @@ function ProjectPage() {
             filtered.map((f) => (
               <button
                 key={f.id}
-                onClick={() => setSelectedId(f.id)}
-                className="w-full text-left rounded-lg border border-border bg-card p-4 hover:border-primary transition-colors"
+                onClick={() => openFeedback(f.id)}
+                className="w-full text-left rounded-lg border border-border bg-card p-4 hover:border-primary transition-colors relative"
               >
-                <div className="flex items-start justify-between gap-2 mb-1">
-                  <span className="text-xs font-medium">{f.author_name}</span>
+                {!f.is_read && (
+                  <span className="absolute top-3 right-3 h-2 w-2 rounded-full bg-red-500" title="Non lu" />
+                )}
+                <div className="flex items-start justify-between gap-2 mb-1 pr-4">
+                  <span className={`text-xs ${!f.is_read ? "font-bold" : "font-medium"}`}>{f.author_name}</span>
                   <span className={`text-xs px-2 py-0.5 rounded-full ${
                     f.status === "open" ? "bg-blue-100 text-blue-700" :
                     f.status === "in_progress" ? "bg-amber-100 text-amber-700" :
@@ -336,6 +359,7 @@ function ProjectPage() {
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }
@@ -589,6 +613,91 @@ function ProjectSettings({ project, onUpdate, plan }: { project: Project; onUpda
         <Button variant="outline" onClick={regenerateToken}>Régénérer le jeton</Button>
         <Button variant="destructive" onClick={deleteProject}>Supprimer le projet</Button>
       </div>
+    </div>
+  );
+}
+
+function ProjectPageSkeleton() {
+  return (
+    <div className="container mx-auto p-4 sm:p-6 max-w-7xl">
+      <Skeleton className="h-4 w-32 mb-4" />
+      <Skeleton className="h-8 w-64 mb-2" />
+      <Skeleton className="h-4 w-40 mb-6" />
+      <Skeleton className="h-24 w-full mb-6 rounded-lg" />
+      <div className="grid lg:grid-cols-[1fr_360px] gap-6">
+        <Skeleton className="h-80 w-full rounded-lg" />
+        <div className="space-y-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} className="h-24 w-full rounded-lg" />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EmptyFeedbacks({
+  isLive,
+  snippet,
+  reviewUrl,
+  copied,
+  onCopy,
+}: {
+  isLive: boolean;
+  snippet: string;
+  reviewUrl: string;
+  copied: boolean;
+  onCopy: () => void;
+}) {
+  const valueToCopy = isLive ? snippet : reviewUrl;
+  return (
+    <div className="rounded-2xl border-2 border-dashed border-primary/30 bg-gradient-to-br from-primary/5 to-transparent p-8">
+      <div className="text-center mb-6">
+        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
+          <Inbox className="h-8 w-8 text-primary" />
+        </div>
+        <h2 className="mt-4 text-xl font-bold">En attente de feedbacks</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {isLive
+            ? "Installez le snippet sur votre site pour commencer à recevoir des retours."
+            : "Partagez le lien à votre client pour qu'il puisse commenter la maquette."}
+        </p>
+      </div>
+
+      <div className="rounded-lg border border-border bg-card p-4 mb-6">
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+          {isLive ? "Votre snippet" : "Votre lien"}
+        </p>
+        <code className="block text-sm bg-muted p-3 rounded-md overflow-x-auto whitespace-nowrap font-mono">
+          {valueToCopy}
+        </code>
+        <Button onClick={onCopy} className="w-full mt-3" size="lg">
+          {copied ? (
+            <>
+              <Check className="h-4 w-4 mr-2" /> Copié !
+            </>
+          ) : (
+            <>
+              <Copy className="h-4 w-4 mr-2" /> Copier le {isLive ? "snippet" : "lien"}
+            </>
+          )}
+        </Button>
+      </div>
+
+      <ol className="grid gap-3 sm:grid-cols-3 text-sm">
+        {[
+          isLive ? "Copiez le snippet" : "Copiez le lien",
+          isLive ? "Collez-le dans votre site" : "Envoyez-le à votre client",
+          "Partagez le lien à votre client",
+        ].slice(0, isLive ? 3 : 2).concat(isLive ? [] : ["Recevez ses feedbacks ici"]).map((label, i) => (
+          <li key={i} className="rounded-lg border border-border bg-card p-3 flex items-start gap-2">
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
+              {i + 1}
+            </span>
+            <span className="text-foreground">{label}</span>
+          </li>
+        ))}
+      </ol>
     </div>
   );
 }

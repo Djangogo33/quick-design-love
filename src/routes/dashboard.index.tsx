@@ -5,11 +5,13 @@ import { useAuth } from "@/lib/auth-context";
 import { RequireAuth } from "@/components/RequireAuth";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
-import { Plus, MessageSquare, Globe, Image as ImageIcon, Sparkles, Code2, Bell, Check, Zap } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
+import { toast } from "sonner";
+import { Plus, MessageSquare, Globe, Image as ImageIcon, Sparkles, Code2, Bell, Check } from "lucide-react";
 import type { Tables } from "@/integrations/supabase/types";
-import { getLimits, PLAN_LABEL, normalizePlan, type PlanId } from "@/lib/plans";
 
-type Project = Tables<"projects"> & { open_count: number };
+type Project = Tables<"projects"> & { open_count: number; unread_count: number };
+type Feedback = Tables<"feedbacks">;
 
 export const Route = createFileRoute("/dashboard/")({
   head: () => ({ meta: [{ title: "Dashboard — ReviewDrop" }] }),
@@ -27,7 +29,6 @@ const ONBOARDING_DISMISSED_KEY = "reviewdrop_onboarding_dismissed";
 function DashboardPage() {
   const { user } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
-  const [plan, setPlan] = useState<PlanId>("free");
   const [loading, setLoading] = useState(true);
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
 
@@ -40,12 +41,12 @@ function DashboardPage() {
   useEffect(() => {
     if (!user) return;
     let mounted = true;
-    (async () => {
-      const [{ data: profileData }, { data: projectsData }] = await Promise.all([
-        supabase.from("profiles").select("plan").eq("id", user.id).maybeSingle(),
-        supabase.from("projects").select("*").order("created_at", { ascending: false }),
-      ]);
-      if (mounted) setPlan(normalizePlan(profileData?.plan));
+
+    const load = async () => {
+      const { data: projectsData } = await supabase
+        .from("projects")
+        .select("*")
+        .order("created_at", { ascending: false });
 
       if (!projectsData) {
         if (mounted) {
@@ -57,21 +58,84 @@ function DashboardPage() {
 
       const counts = await Promise.all(
         projectsData.map(async (p) => {
-          const { count } = await supabase
-            .from("feedbacks")
-            .select("*", { count: "exact", head: true })
-            .eq("project_id", p.id)
-            .eq("status", "open");
-          return { ...p, open_count: count ?? 0 };
-        })
+          const [{ count: open }, { count: unread }] = await Promise.all([
+            supabase
+              .from("feedbacks")
+              .select("*", { count: "exact", head: true })
+              .eq("project_id", p.id)
+              .eq("status", "open"),
+            supabase
+              .from("feedbacks")
+              .select("*", { count: "exact", head: true })
+              .eq("project_id", p.id)
+              .eq("is_read", false),
+          ]);
+          return { ...p, open_count: open ?? 0, unread_count: unread ?? 0 };
+        }),
       );
       if (mounted) {
         setProjects(counts);
         setLoading(false);
       }
-    })();
+    };
+
+    load();
+
+    // Realtime: update counters live when feedbacks change on owned projects.
+    const channel = supabase
+      .channel(`dashboard-${user.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "feedbacks" },
+        (payload) => {
+          const row = (payload.new ?? payload.old) as Feedback | undefined;
+          if (!row) return;
+          setProjects((prev) => {
+            if (!prev.some((p) => p.id === row.project_id)) return prev;
+            return prev.map((p) => {
+              if (p.id !== row.project_id) return p;
+              if (payload.eventType === "INSERT") {
+                const f = payload.new as Feedback;
+                if (mounted && !document.hidden) {
+                  toast.success(`💬 Nouveau feedback de ${f.author_name}`);
+                }
+                return {
+                  ...p,
+                  open_count: p.open_count + (f.status === "open" ? 1 : 0),
+                  unread_count: p.unread_count + (f.is_read ? 0 : 1),
+                };
+              }
+              if (payload.eventType === "DELETE") {
+                const f = payload.old as Feedback;
+                return {
+                  ...p,
+                  open_count: Math.max(0, p.open_count - (f.status === "open" ? 1 : 0)),
+                  unread_count: Math.max(0, p.unread_count - (f.is_read ? 0 : 1)),
+                };
+              }
+              if (payload.eventType === "UPDATE") {
+                const oldF = payload.old as Feedback;
+                const newF = payload.new as Feedback;
+                const openDelta =
+                  (newF.status === "open" ? 1 : 0) - (oldF.status === "open" ? 1 : 0);
+                const unreadDelta =
+                  (newF.is_read ? 0 : 1) - (oldF.is_read ? 0 : 1);
+                return {
+                  ...p,
+                  open_count: Math.max(0, p.open_count + openDelta),
+                  unread_count: Math.max(0, p.unread_count + unreadDelta),
+                };
+              }
+              return p;
+            });
+          });
+        },
+      )
+      .subscribe();
+
     return () => {
       mounted = false;
+      supabase.removeChannel(channel);
     };
   }, [user]);
 
@@ -82,7 +146,7 @@ function DashboardPage() {
 
   const hasProject = projects.length > 0;
   const hasFeedback = projects.some((p) => p.open_count > 0);
-  const showOnboarding = !loading && !onboardingDismissed && (!hasProject || !hasFeedback);
+  const showOnboarding = !loading && hasProject && !onboardingDismissed && !hasFeedback;
 
   return (
     <div className="container mx-auto p-6 max-w-6xl">
@@ -95,80 +159,36 @@ function DashboardPage() {
         />
       )}
 
-      {(() => {
-        const limits = getLimits(plan);
-        const max = limits.maxActiveProjects;
-        const atLimit = max !== null && projects.length >= max;
-        const planIcon = plan === "max" ? <Zap className="h-3 w-3" /> : plan === "pro" ? <Sparkles className="h-3 w-3" /> : null;
-        return (
-          <div className="flex items-center justify-between mb-8 gap-4 flex-wrap">
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-2xl font-bold">Mes projets</h1>
-                <Link
-                  to="/dashboard/billing"
-                  className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ${
-                    plan === "free"
-                      ? "bg-muted text-muted-foreground hover:bg-muted/80"
-                      : "bg-primary/10 text-primary hover:bg-primary/20"
-                  } transition-colors`}
-                >
-                  {planIcon}
-                  {PLAN_LABEL[plan]}
-                </Link>
-              </div>
-              <p className="text-sm text-muted-foreground mt-1">
-                {projects.length} projet{projects.length > 1 ? "s" : ""}
-                {max !== null && (
-                  <>
-                    {" "}sur {max}
-                    {atLimit && (
-                      <>
-                        {" — "}
-                        <Link to="/dashboard/billing" className="text-primary hover:underline font-medium">
-                          Limite atteinte, passez à un plan supérieur
-                        </Link>
-                      </>
-                    )}
-                  </>
-                )}
-              </p>
+      {!loading && hasProject && (
+        <div className="flex items-center justify-between mb-8 gap-4 flex-wrap">
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-bold">Mes projets</h1>
+              <Link
+                to="/dashboard/billing"
+                className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+              >
+                <Sparkles className="h-3 w-3" />
+                Beta
+              </Link>
             </div>
-            {atLimit ? (
-              <Link to="/dashboard/billing">
-                <Button variant="outline">
-                  <Sparkles className="mr-2 h-4 w-4" />
-                  Augmenter ma limite
-                </Button>
-              </Link>
-            ) : (
-              <Link to="/dashboard/projects/new">
-                <Button>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Nouveau projet
-                </Button>
-              </Link>
-            )}
+            <p className="text-sm text-muted-foreground mt-1">
+              {projects.length} projet{projects.length > 1 ? "s" : ""}
+            </p>
           </div>
-        );
-      })()}
-
-      {loading ? (
-        <div className="text-center py-12 text-muted-foreground">Chargement...</div>
-      ) : projects.length === 0 ? (
-        <div className="rounded-lg border-2 border-dashed border-border bg-card p-12 text-center">
-          <MessageSquare className="mx-auto h-10 w-10 text-muted-foreground" />
-          <h3 className="mt-4 font-semibold">Aucun projet pour l'instant</h3>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Créez votre premier projet pour commencer à recevoir des feedbacks.
-          </p>
-          <Link to="/dashboard/projects/new" className="mt-4 inline-block">
+          <Link to="/dashboard/projects/new">
             <Button>
               <Plus className="mr-2 h-4 w-4" />
-              Créer un projet
+              Nouveau projet
             </Button>
           </Link>
         </div>
+      )}
+
+      {loading ? (
+        <ProjectsSkeleton />
+      ) : projects.length === 0 ? (
+        <EmptyDashboard />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {projects.map((p) => (
@@ -179,17 +199,27 @@ function DashboardPage() {
               className="rounded-lg border border-border bg-card p-5 hover:border-primary transition-colors"
             >
               <div className="flex items-start justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="flex h-8 w-8 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="flex h-8 w-8 items-center justify-center rounded-md bg-muted text-muted-foreground shrink-0">
                     {p.type === "live" ? <Globe className="h-4 w-4" /> : <ImageIcon className="h-4 w-4" />}
                   </span>
                   <h3 className="font-semibold truncate">{p.name}</h3>
                 </div>
-                {p.open_count > 0 && (
-                  <span className="rounded-full bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground">
-                    {p.open_count}
-                  </span>
-                )}
+                <div className="flex items-center gap-1 shrink-0">
+                  {p.unread_count > 0 && (
+                    <span
+                      title={`${p.unread_count} non lu${p.unread_count > 1 ? "s" : ""}`}
+                      className="rounded-full bg-red-500 px-2 py-0.5 text-xs font-bold text-white"
+                    >
+                      {p.unread_count}
+                    </span>
+                  )}
+                  {p.open_count > 0 && (
+                    <span className="rounded-full bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground">
+                      {p.open_count}
+                    </span>
+                  )}
+                </div>
               </div>
               <p className="mt-3 text-xs text-muted-foreground">
                 {p.type === "live" ? "Site web" : "Maquette"} · Créé le{" "}
@@ -199,6 +229,42 @@ function DashboardPage() {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function ProjectsSkeleton() {
+  return (
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {Array.from({ length: 3 }).map((_, i) => (
+        <div key={i} className="rounded-lg border border-border bg-card p-5">
+          <div className="flex items-center gap-2">
+            <Skeleton className="h-8 w-8 rounded-md" />
+            <Skeleton className="h-4 w-32" />
+          </div>
+          <Skeleton className="mt-4 h-3 w-40" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function EmptyDashboard() {
+  return (
+    <div className="rounded-2xl border-2 border-dashed border-primary/30 bg-gradient-to-br from-primary/5 to-transparent p-12 text-center">
+      <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-2xl bg-primary/10">
+        <MessageSquare className="h-10 w-10 text-primary" />
+      </div>
+      <h2 className="mt-6 text-2xl font-bold">Créez votre premier projet</h2>
+      <p className="mt-2 text-muted-foreground max-w-md mx-auto">
+        Recueillez vos premiers feedbacks visuels en 2 minutes.
+      </p>
+      <Link to="/dashboard/projects/new" className="mt-6 inline-block">
+        <Button size="lg">
+          <Plus className="mr-2 h-4 w-4" />
+          Créer un projet
+        </Button>
+      </Link>
     </div>
   );
 }
@@ -226,7 +292,7 @@ function OnboardingCard({
       done: hasProject,
       icon: Code2,
       title: "Installez le widget ou partagez le lien",
-      desc: "Collez le snippet dans le <head> du site, ou envoyez le lien de la maquette à votre client.",
+      desc: "Collez le snippet dans le <head> du site, ou envoyez le lien de la maquette.",
     },
     {
       done: hasFeedback,
@@ -250,10 +316,7 @@ function OnboardingCard({
             3 étapes pour collecter votre premier feedback.
           </p>
         </div>
-        <button
-          onClick={onDismiss}
-          className="text-xs text-muted-foreground hover:text-foreground"
-        >
+        <button onClick={onDismiss} className="text-xs text-muted-foreground hover:text-foreground">
           Masquer
         </button>
       </div>
@@ -271,9 +334,7 @@ function OnboardingCard({
               <div className="flex items-center gap-2 mb-2">
                 <span
                   className={`flex h-8 w-8 items-center justify-center rounded-md text-sm font-bold ${
-                    s.done
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted text-muted-foreground"
+                    s.done ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
                   }`}
                 >
                   {s.done ? <Check className="h-4 w-4" /> : i + 1}

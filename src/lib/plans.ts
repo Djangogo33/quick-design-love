@@ -1,50 +1,36 @@
 // Central plan definitions and limits.
-// Used by dashboard, project settings, and widget config endpoint.
+// BETA MODE: all features unlocked for everyone, no plan gating.
+// TODO: re-enable post-beta — restore original per-plan limits.
 
 export type PlanId = "free" | "pro" | "max";
 
 export interface PlanLimits {
   maxActiveProjects: number | null; // null = unlimited
-  customBrandColor: boolean;        // can pick widget color
+  customBrandColor: boolean;
   csvExport: boolean;
   webhooks: boolean;
-  removeBadge: boolean;             // hide "Powered by ReviewDrop"
+  removeBadge: boolean;
   customDomain: boolean;
   prioritySupport: boolean;
   dedicatedSupport: boolean;
 }
 
+// Beta: every plan is fully unlocked.
+const BETA_UNLIMITED: PlanLimits = {
+  maxActiveProjects: null,
+  customBrandColor: true,
+  csvExport: true,
+  webhooks: true,
+  removeBadge: true,
+  customDomain: true,
+  prioritySupport: true,
+  dedicatedSupport: true,
+};
+
 export const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
-  free: {
-    maxActiveProjects: 3,
-    customBrandColor: false,
-    csvExport: false,
-    webhooks: false,
-    removeBadge: false,
-    customDomain: false,
-    prioritySupport: false,
-    dedicatedSupport: false,
-  },
-  pro: {
-    maxActiveProjects: null,
-    customBrandColor: true,
-    csvExport: true,
-    webhooks: false,
-    removeBadge: false,
-    customDomain: false,
-    prioritySupport: true,
-    dedicatedSupport: false,
-  },
-  max: {
-    maxActiveProjects: null,
-    customBrandColor: true,
-    csvExport: true,
-    webhooks: true,
-    removeBadge: true,
-    customDomain: true,
-    prioritySupport: true,
-    dedicatedSupport: true,
-  },
+  free: BETA_UNLIMITED,
+  pro: BETA_UNLIMITED,
+  max: BETA_UNLIMITED,
 };
 
 export const DEFAULT_BRAND_COLOR = "#6366f1";
@@ -53,12 +39,13 @@ export function normalizePlan(plan: string | null | undefined): PlanId {
   return plan === "pro" || plan === "max" ? plan : "free";
 }
 
-export function getLimits(plan: string | null | undefined): PlanLimits {
-  return PLAN_LIMITS[normalizePlan(plan)];
+export function getLimits(_plan: string | null | undefined): PlanLimits {
+  // Beta mode: ignore plan, return unlimited.
+  return BETA_UNLIMITED;
 }
 
 export const PLAN_LABEL: Record<PlanId, string> = {
-  free: "Free",
-  pro: "Pro",
-  max: "Max",
+  free: "Beta",
+  pro: "Beta",
+  max: "Beta",
 };

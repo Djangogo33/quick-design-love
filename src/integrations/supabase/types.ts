@@ -55,6 +55,7 @@ export type Database = {
           created_at: string
           css_selector: string | null
           id: string
+          is_read: boolean
           message: string
           page_url: string | null
           position_x: number
@@ -72,6 +73,7 @@ export type Database = {
           created_at?: string
           css_selector?: string | null
           id?: string
+          is_read?: boolean
           message: string
           page_url?: string | null
           position_x: number
@@ -89,6 +91,7 @@ export type Database = {
           created_at?: string
           css_selector?: string | null
           id?: string
+          is_read?: boolean
           message?: string
           page_url?: string | null
           position_x?: number
