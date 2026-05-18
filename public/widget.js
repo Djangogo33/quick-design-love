@@ -92,6 +92,8 @@
       ".rdrop-cancel{background:transparent;color:#666;}" +
       ".rdrop-submit{background:" + BRAND + ";color:#fff;}" +
       ".rdrop-submit:disabled{opacity:.5;cursor:not-allowed;}" +
+      ".rdrop-inline-error{margin-top:12px;padding:8px 10px;background:#fee2e2;color:#991b1b;border-radius:6px;font-size:13px;}" +
+      ".rdrop-inline-success{margin-top:12px;padding:8px 10px;background:#d1fae5;color:#065f46;border-radius:6px;font-size:13px;text-align:center;font-weight:500;}" +
       "#rdrop-toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:2147483647;background:#10b981;color:#fff;padding:10px 18px;border-radius:8px;font-size:14px;box-shadow:0 4px 16px rgba(0,0,0,.2);}";
     document.head.appendChild(style);
 
