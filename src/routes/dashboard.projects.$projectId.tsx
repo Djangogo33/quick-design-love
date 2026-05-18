@@ -272,16 +272,25 @@ function ProjectPage() {
         ))}
       </div>
 
+      {feedbacks.length === 0 ? (
+        <EmptyFeedbacks
+          isLive={project.type === "live"}
+          snippet={snippet}
+          reviewUrl={reviewUrl}
+          copied={copied}
+          onCopy={() => copySnippet(project.type === "live" ? snippet : reviewUrl)}
+        />
+      ) : (
       <div className="grid lg:grid-cols-[1fr_360px] gap-6">
         {/* Mockup preview with pins */}
         {project.type === "mockup" && mockupUrl && (
           <div className="relative rounded-lg border border-border bg-card overflow-hidden">
             <div className="relative">
               <img src={mockupUrl} alt={project.name} className="w-full block" />
-              {filtered.map((f, i) => (
+              {filtered.map((f) => (
                 <button
                   key={f.id}
-                  onClick={() => setSelectedId(f.id)}
+                  onClick={() => openFeedback(f.id)}
                   className={`absolute -translate-x-1/2 -translate-y-full flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold text-white shadow-lg ring-2 ring-white transition-transform hover:scale-110 ${
                     selectedId === f.id ? "scale-125 z-10" : ""
                   }`}
@@ -311,8 +320,8 @@ function ProjectPage() {
         <div className="space-y-3">
           {filtered.length === 0 ? (
             <div className="rounded-lg border-2 border-dashed border-border bg-card p-8 text-center">
-              <MessageSquare className="mx-auto h-8 w-8 text-muted-foreground" />
-              <p className="mt-2 text-sm text-muted-foreground">Aucun feedback</p>
+              <Inbox className="mx-auto h-8 w-8 text-muted-foreground" />
+              <p className="mt-2 text-sm text-muted-foreground">Aucun feedback avec ce filtre</p>
             </div>
           ) : selected ? (
             <FeedbackDetail
@@ -325,11 +334,14 @@ function ProjectPage() {
             filtered.map((f) => (
               <button
                 key={f.id}
-                onClick={() => setSelectedId(f.id)}
-                className="w-full text-left rounded-lg border border-border bg-card p-4 hover:border-primary transition-colors"
+                onClick={() => openFeedback(f.id)}
+                className="w-full text-left rounded-lg border border-border bg-card p-4 hover:border-primary transition-colors relative"
               >
-                <div className="flex items-start justify-between gap-2 mb-1">
-                  <span className="text-xs font-medium">{f.author_name}</span>
+                {!f.is_read && (
+                  <span className="absolute top-3 right-3 h-2 w-2 rounded-full bg-red-500" title="Non lu" />
+                )}
+                <div className="flex items-start justify-between gap-2 mb-1 pr-4">
+                  <span className={`text-xs ${!f.is_read ? "font-bold" : "font-medium"}`}>{f.author_name}</span>
                   <span className={`text-xs px-2 py-0.5 rounded-full ${
                     f.status === "open" ? "bg-blue-100 text-blue-700" :
                     f.status === "in_progress" ? "bg-amber-100 text-amber-700" :
