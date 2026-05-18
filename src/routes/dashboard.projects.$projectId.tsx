@@ -359,6 +359,7 @@ function ProjectPage() {
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }
