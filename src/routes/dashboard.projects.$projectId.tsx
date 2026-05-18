@@ -228,7 +228,7 @@ function ProjectPage() {
             </p>
             <div className="flex gap-2 items-stretch">
               <code className="flex-1 text-xs bg-muted p-3 rounded-md overflow-x-auto whitespace-nowrap">{snippet}</code>
-              <Button variant="outline" onClick={copySnippet}>
+              <Button variant="outline" onClick={() => copySnippet()}>
                 {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
               </Button>
             </div>
